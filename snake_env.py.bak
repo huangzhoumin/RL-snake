@@ -1,0 +1,134 @@
+import pygame
+import numpy as np
+import random
+
+# 初始化pygame
+pygame.init()
+
+# 游戏基础配置
+BLOCK_SIZE = 20  # 方块大小
+WIDTH = 400      # 窗口宽度
+HEIGHT = 400     # 窗口高度
+SCREEN = pygame.display.set_mode((WIDTH, HEIGHT))
+pygame.display.set_caption("Snake Imitation Learning")
+
+# 颜色定义
+BLACK = (0, 0, 0)
+GREEN = (0, 255, 0)  # 蛇身颜色
+RED = (255, 0, 0)    # 食物颜色
+
+class SnakeEnv:
+    def __init__(self):
+        self.reset()  # 初始化游戏状态
+        self.eat_food_num = 0
+
+    def reset(self):
+        """重置游戏，返回初始状态"""
+        # 蛇初始位置（头部在中心，身体向右延伸）
+        self.snake = [
+            (WIDTH//2, HEIGHT//2),
+            (WIDTH//2 - BLOCK_SIZE, HEIGHT//2),
+            (WIDTH//2 - 2*BLOCK_SIZE, HEIGHT//2)
+        ]
+        self.direction = (BLOCK_SIZE, 0)  # 初始方向：向右
+        self.food = self._generate_food()  # 生成食物
+        self.done = False  # 游戏结束标志
+        return self._get_state()
+
+    def _generate_food(self):
+        """生成不与蛇身重叠的食物"""
+        while True:
+            x = random.randint(0, (WIDTH - BLOCK_SIZE) // BLOCK_SIZE) * BLOCK_SIZE
+            y = random.randint(0, (HEIGHT - BLOCK_SIZE) // BLOCK_SIZE) * BLOCK_SIZE
+            if (x, y) not in self.snake:
+                return (x, y)
+
+
+    def _get_state(self):
+        """获取12维状态向量（食物位置+障碍检测+当前方向）"""
+        head_x, head_y = self.snake[0]
+        food_x, food_y = self.food
+
+        # 1. 食物相对位置（4维）：上下左右是否有食物
+        food_up = 1 if head_y > food_y else 0
+        food_down = 1 if head_y < food_y else 0
+        food_left = 1 if head_x > food_x else 0
+        food_right = 1 if head_x < food_x else 0
+
+        # 2. 障碍检测（4维）：上下左右是否撞墙/撞自身
+        obs_up = 1 if (head_y - BLOCK_SIZE < 0) or (head_x, head_y - BLOCK_SIZE) in self.snake else 0
+        obs_down = 1 if (head_y + BLOCK_SIZE >= HEIGHT) or (head_x, head_y + BLOCK_SIZE) in self.snake else 0
+        obs_left = 1 if (head_x - BLOCK_SIZE < 0) or (head_x - BLOCK_SIZE, head_y) in self.snake else 0
+        obs_right = 1 if (head_x + BLOCK_SIZE >= WIDTH) or (head_x + BLOCK_SIZE, head_y) in self.snake else 0
+
+        # 3. 当前方向（4维独热编码）：上下左右
+        dir_up = 1 if self.direction == (0, -BLOCK_SIZE) else 0
+        dir_down = 1 if self.direction == (0, BLOCK_SIZE) else 0
+        dir_left = 1 if self.direction == (-BLOCK_SIZE, 0) else 0
+        dir_right = 1 if self.direction == (BLOCK_SIZE, 0) else 0
+
+        return np.array([
+            food_up, food_down, food_left, food_right,
+            obs_up, obs_down, obs_left, obs_right,
+            dir_up, dir_down, dir_left, dir_right
+        ], dtype=np.float32)
+    # 这里reward 只有两种 -10 10
+    def step(self, action):
+        """执行动作，返回下一个状态、奖励、游戏结束标志"""
+        # 动作映射：0=上，1=下，2=左，3=右
+        action_map = [
+            (0, -BLOCK_SIZE),  # 上
+            (0, BLOCK_SIZE),   # 下
+            (-BLOCK_SIZE, 0),  # 左
+            (BLOCK_SIZE, 0)    # 右
+        ]
+        self.direction = action_map[action]
+
+        # 移动蛇头
+        new_head = (self.snake[0][0] + self.direction[0], self.snake[0][1] + self.direction[1])
+        reward = 0
+        # 检测碰撞（撞墙/撞自身）
+        if (new_head[0] < 0 or new_head[0] >= WIDTH or
+            new_head[1] < 0 or new_head[1] >= HEIGHT or
+            new_head in self.snake):
+            self.done = True
+            return self._get_state(), reward-10, self.done  # 碰撞奖励-10
+
+        reward += 0.1  # 存活奖励
+        # 更新蛇身
+        self.snake.insert(0, new_head)
+        # 检测是否吃食物
+        if new_head == self.food:
+            self.food = self._generate_food()
+            self.eat_food_num += 1
+            return self._get_state(), reward+10, self.done  # 吃食物奖励+10
+        else:
+            self.snake.pop()  # 没吃食物(但是还存活)，移除蛇尾
+            return self._get_state(), reward, self.done
+
+    # 示例：在主流程中计算修正奖励
+    def calc_reward(self, env, old_head_pos, new_head_pos, food_pos, is_repeat):
+        old_dist = np.linalg.norm(np.array(old_head_pos) - np.array(food_pos))
+        new_dist = np.linalg.norm(np.array(new_head_pos) - np.array(food_pos))
+        reward = 0.0
+        if env.eat_food_num > eat_food_num:
+            reward += 20.0  # 吃食物奖励
+        elif new_dist < old_dist:
+            reward += 0.5  # 靠近食物奖励
+        reward += 0.1  # 存活奖励
+        if is_repeat:
+            reward -= 1.0  # 重复路径惩罚
+        if done:
+            reward -= 10.0  # 死亡惩罚
+        return reward
+
+    def render(self):
+        """绘制游戏画面"""
+        SCREEN.fill(BLACK)
+        # 画蛇身
+        for segment in self.snake:
+            pygame.draw.rect(SCREEN, GREEN, (segment[0], segment[1], BLOCK_SIZE-1, BLOCK_SIZE-1))
+        # 画食物
+        pygame.draw.rect(SCREEN, RED, (self.food[0], self.food[1], BLOCK_SIZE-1, BLOCK_SIZE-1))
+        pygame.display.update()
+        pygame.time.Clock().tick(10)  # 游戏速度（10帧/秒）
